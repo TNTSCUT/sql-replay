@@ -39,20 +39,38 @@ type LogEntry struct {
 
 // CSVRecord 对应CSV的每一行
 type CSVRecord struct {
-	Timestamp     string  `csv:"Timestamp"`
-	SQLID         string  `csv:"SQL ID"`
-	SQLText       string  `csv:"SQLText"`
-	DBName        string  `csv:"DBName"`
-	ExecutionTime float64 `csv:"执行耗时(秒)"`
-	LockWaitTime  float64 `csv:"锁等待耗时(秒)"`
-	ReturnRows    int     `csv:"返回行数"`
-	ScanRows      int64   `csv:"扫描行数"`
-	SourceIP      string  `csv:"访问来源"`
-	Username      string  `csv:"用户"`
-	ThreadID      string  `csv:"线程"`
-	TableNames    string  `csv:"表名"`
-	Tags          string  `csv:"标签"`
+	Timestamp     string  `csv:"TS"`
+	SQLID         string  `csv:"TID"`
+	SQLText       string  `csv:"LOG"`
+	DBName        string  `csv:"DB"`
+	ExecutionTime float64 `csv:"LATENCY"`
+	LockWaitTime  float64 `csv:"LOCK_TIME"`
+	ReturnRows    int     `csv:"RETURN_ROWS"`
+	ScanRows      int64   `csv:"UPDATE_ROWS"`
+	SourceIP      string  `csv:"USER_IP"`
+	SQLTye        string  `csv:"SQL_TYPE"`
+	Username      string  `csv:"USER"`
+	ThreadID      string  `csv:"TID"`
+	TableNames    string  `csv:"TABLE_NAME"`
+	Tags          string  `csv:"TID"`
 }
+
+// // CSVRecord 对应CSV的每一行
+// type CSVRecord struct {
+// 	Timestamp     string  `csv:"Timestamp"`
+// 	SQLID         string  `csv:"SQL ID"`
+// 	SQLText       string  `csv:"SQLText"`
+// 	DBName        string  `csv:"DBName"`
+// 	ExecutionTime float64 `csv:"执行耗时(秒)"`
+// 	LockWaitTime  float64 `csv:"锁等待耗时(秒)"`
+// 	ReturnRows    int     `csv:"返回行数"`
+// 	ScanRows      int64   `csv:"扫描行数"`
+// 	SourceIP      string  `csv:"访问来源"`
+// 	Username      string  `csv:"用户"`
+// 	ThreadID      string  `csv:"线程"`
+// 	TableNames    string  `csv:"表名"`
+// 	Tags          string  `csv:"标签"`
+// }
 
 type SQLTask struct {
 	Entry LogEntry
