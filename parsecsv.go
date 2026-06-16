@@ -61,6 +61,23 @@ func parseCSVLog(csvFilePath, slowOutputPath string) {
 		}
 
 		// 确保记录有足够的字段
+		// PolarDB CSV 有 18 列，但 SQL_TEXT 列可能包含 JSON 数据（含 \" 转义），
+		// Go 的 csv.Reader 会将 \" 后的逗号误判为字段分隔符，导致字段数超过 18。
+		// 当字段数 > 18 时，将多余字段合并回第 0 列（SQL_TEXT）。
+		if len(record) > 18 {
+			excess := len(record) - 18
+			// 将 record[1] 到 record[excess] 合并回 record[0]
+			merged := record[0]
+			for i := 1; i <= excess; i++ {
+				merged += "," + record[i]
+			}
+			// 重组 record：merged 作为 [0]，其余字段从 excess+1 开始
+			newRecord := make([]string, 0, 18)
+			newRecord = append(newRecord, merged)
+			newRecord = append(newRecord, record[excess+1:]...)
+			record = newRecord
+		}
+
 		if len(record) < 18 {
 			log.Printf("record miss column : %v", record)
 			continue
@@ -148,10 +165,17 @@ func parseCSVRecord(record []string) (*CSVRecord, error) {
 
 // convertToJSON 将CSV记录转换为JSON输出格式
 func convertToJSON(csvRecord *CSVRecord) (*LogEntry, error) {
-	// 解析时间戳
-	timestamp, err := time.Parse("2006/1/2 15:04:05", csvRecord.Timestamp)
+	// 解析时间戳，兼容两种格式：
+	// PolarDB: 2026/6/12 10:57:59 (上游格式)
+	// MySQL general log CSV: 2026-06-13 10:20:30
+	var timestamp time.Time
+	var err error
+	timestamp, err = time.Parse("2006/1/2 15:04:05", csvRecord.Timestamp)
 	if err != nil {
-		return nil, fmt.Errorf("parse time failed : %v", err)
+		timestamp, err = time.Parse("2006-01-02 15:04:05", csvRecord.Timestamp)
+		if err != nil {
+			return nil, fmt.Errorf("parse time failed : %v", err)
+		}
 	}
 
 	// 提取SQL类型（从SQL语句的第一个单词）
