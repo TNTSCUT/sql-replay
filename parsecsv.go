@@ -61,7 +61,7 @@ func parseCSVLog(csvFilePath, slowOutputPath string) {
 		}
 
 		// 确保记录有足够的字段
-		if len(record) < 13 {
+		if len(record) < 18 {
 			log.Printf("record miss column : %v", record)
 			continue
 		}
@@ -97,20 +97,19 @@ func parseCSVLog(csvFilePath, slowOutputPath string) {
 // parseCSVRecord 解析CSV记录到结构体
 func parseCSVRecord(record []string) (*CSVRecord, error) {
 	csvRecord := &CSVRecord{
-		Timestamp:  record[0],
-		SQLID:      record[1],
-		SQLText:    record[2],
-		DBName:     record[3],
-		SourceIP:   record[8],
-		Username:   record[9],
-		ThreadID:   record[10],
-		TableNames: record[11],
-		Tags:       record[12],
+		SQLText:    record[0],
+		DBName:     record[1],
+		ThreadID:   record[2],
+		Username:   record[3],
+		SourceIP:   record[4],
+		SQLTye:     record[5],
+		TableNames: record[8],
+		Timestamp:  record[10],
 	}
 
 	// 解析执行耗时
-	if record[4] != "" {
-		execTime, err := strconv.ParseFloat(record[4], 64)
+	if record[9] != "" {
+		execTime, err := strconv.ParseFloat(record[9], 64)
 		if err != nil {
 			return nil, fmt.Errorf("parse execution time failed: %v", err)
 		}
@@ -118,8 +117,8 @@ func parseCSVRecord(record []string) (*CSVRecord, error) {
 	}
 
 	// 解析锁等待耗时
-	if record[5] != "" {
-		lockTime, err := strconv.ParseFloat(record[5], 64)
+	if record[13] != "" {
+		lockTime, err := strconv.ParseFloat(record[13], 64)
 		if err != nil {
 			return nil, fmt.Errorf("parse lock wait time failed : %v", err)
 		}
@@ -127,8 +126,8 @@ func parseCSVRecord(record []string) (*CSVRecord, error) {
 	}
 
 	// 解析返回行数
-	if record[6] != "" {
-		returnRows, err := strconv.ParseInt(record[6], 10, 64)
+	if record[12] != "" {
+		returnRows, err := strconv.ParseInt(record[12], 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("parse return rows failed: %v", err)
 		}
@@ -150,7 +149,7 @@ func parseCSVRecord(record []string) (*CSVRecord, error) {
 // convertToJSON 将CSV记录转换为JSON输出格式
 func convertToJSON(csvRecord *CSVRecord) (*LogEntry, error) {
 	// 解析时间戳
-	timestamp, err := time.Parse("2006-01-02 15:04:05", csvRecord.Timestamp)
+	timestamp, err := time.Parse("2006/1/2 15:04:05", csvRecord.Timestamp)
 	if err != nil {
 		return nil, fmt.Errorf("parse time failed : %v", err)
 	}
