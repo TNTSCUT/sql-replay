@@ -90,7 +90,31 @@ Note:
 2. In 'user:password@tcp(ip:port)/db', 'db' refers to the target database for replay.
 3. Advanced Future: -ignoredigests digest1,digest2,digest3...
 
-## 3. Import Replay Results to Database
+## 3. Route JSONL Records by Database Name (json_replay_route)
+After parsing, you can route JSONL records by `dbname` field into per-database JSON files. This is useful when you need to replay specific databases separately.
+
+```
+# Route all .json files in a directory to per-dbname output files
+./sql-replay -mode json_replay_route -route-in /opt/parse_output -route-out /opt/routed_output
+# Dry run to preview without writing
+./sql-replay -mode json_replay_route -route-in /opt/parse_output -route-dry-run
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-route-in` | Input directory containing .json files (required) | - |
+| `-route-out` | Output directory for routed files | Same as `-route-in` |
+| `-route-prefix` | Output filename prefix | `replay_` |
+| `-route-dry-run` | Print what would be done, do not write | `false` |
+| `-route-skip-no-dbname` | Skip lines without dbname field | `true` |
+| `-route-skip-self` | Skip input files matching output pattern | `true` |
+| `-route-no-progress` | Disable progress bar | `false` |
+| `-route-no-line-count` | Skip pre-pass line counting (faster startup) | `false` |
+| `-route-quiet` | Suppress per-file output | `false` |
+
+This reads every `.json` file in `-route-in`, extracts the `dbname` field from each JSONL line using regex, and appends the raw line to `<prefix><dbname>.json` in the output directory. The routed files can then be used directly as input for the replay step.
+
+## 4. Import Replay Results to Database
 **Import data**
 ```
 # Import Replay Results For task sb1_all 
@@ -100,7 +124,7 @@ Note:
 ```
 Note: -out-dir is the directory for storing replay results, -replay-name is the replay task name, table is the result table to write to.
 
-## 4. Generate Report
+## 5. Generate Report
 ```
 ./sql-replay -mode report -db 'user:password@tcp(ip:port)/db' -replay-name slow1 -port ':8081'
 ```
