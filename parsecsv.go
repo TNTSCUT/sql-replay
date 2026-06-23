@@ -187,7 +187,7 @@ func convertToJSON(csvRecord *CSVRecord) (*LogEntry, error) {
 	// 转换为JSON输出
 	jsonOutput := &LogEntry{
 		ConnectionID: csvRecord.ThreadID,                                              // 线程作为connection_id
-		QueryTime:    int64(csvRecord.ExecutionTime * 1000000),                        // 执行耗时,Convert seconds to microseconds
+		QueryTime:    int64(csvRecord.ExecutionTime),                                  // 执行耗时, Polardb 默认是微秒
 		SQL:          cleanedSQL,                                                      // SQL文本
 		RowsSent:     csvRecord.ReturnRows,                                            // 返回行数
 		Username:     csvRecord.Username,                                              // 用户

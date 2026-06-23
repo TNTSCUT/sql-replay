@@ -89,7 +89,31 @@ mkdir out # 用于存储回放结果
 2. 'user:password@tcp(ip:port)/db' 中的 db 指的是用于回放的目标库
 3. 高级功能：-ignoredigests digest1,digest2,digest3... 回放时可以忽略指定的 SQL
 
-## 3. 导入回放结果到数据库
+## 3. 按数据库名路由 JSONL 记录（json_replay_route）
+解析完成后，可以按 `dbname` 字段将 JSONL 记录路由到按数据库分离的 JSON 文件中，便于按库分别回放。
+
+```
+# 将目录中所有 .json 文件按 dbname 路由到独立输出文件
+./sql-replay -mode json_replay_route -route-in /opt/parse_output -route-out /opt/routed_output
+# 试运行（预览不写入）
+./sql-replay -mode json_replay_route -route-in /opt/parse_output -route-dry-run
+```
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `-route-in` | 输入目录，包含待路由的 .json 文件（必填） | - |
+| `-route-out` | 输出目录 | 同 `-route-in` |
+| `-route-prefix` | 输出文件名前缀 | `replay_` |
+| `-route-dry-run` | 试运行，仅打印不写入 | `false` |
+| `-route-skip-no-dbname` | 跳过不含 dbname 字段的行 | `true` |
+| `-route-skip-self` | 跳过与输出模式匹配的输入文件 | `true` |
+| `-route-no-progress` | 关闭进度条 | `false` |
+| `-route-no-line-count` | 跳过预扫描行数（加快启动速度） | `false` |
+| `-route-quiet` | 静默模式，不输出每个文件信息 | `false` |
+
+该命令读取 `-route-in` 目录中的所有 `.json` 文件，使用正则从每行 JSONL 中提取 `dbname` 字段，将原始行追加写入输出目录的 `<前缀><dbname>.json` 文件中。路由后的文件可直接作为回放步骤的输入。
+
+## 4. 导入回放结果到数据库
 **导入数据**
 ```
 # 导入回放任务 sb1_all 的回放数据 
@@ -99,7 +123,7 @@ mkdir out # 用于存储回放结果
 ```
 说明：-out-dir 为回放结果存储目录，-replay-name 回放任务名称，table 为写入结果表
 
-## 4. 生成报告
+## 5. 生成报告
 
 ```
 ./sql-replay -mode report -db 'user:password@tcp(ip:port)/db' -replay-name slow1 -port ':8081'
