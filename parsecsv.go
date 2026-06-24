@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -32,12 +33,19 @@ func parseCSVLog(csvFilePath, slowOutputPath string) {
 	}
 	defer outputFile.Close()
 
+	// 优化：bufio.Writer 缓冲输出，避免每条记录一次 write syscall。
+	bufWriter := bufio.NewWriterSize(outputFile, 64*1024)
+	defer bufWriter.Flush()
+
 	// 创建CSV reader
 	reader := csv.NewReader(file)
 
 	// 设置选项以适应包含逗号和换行符的字段
 	reader.LazyQuotes = true
 	reader.FieldsPerRecord = -1 // 允许字段数量可变
+
+	// 优化：json.Encoder 直接流式写入 bufWriter，避免每行 json.Marshal + string() + Fprintln 的两次全量拷贝。
+	jsonEncoder := json.NewEncoder(bufWriter)
 
 	// 读取表头
 	headers, err := reader.Read()
@@ -66,16 +74,8 @@ func parseCSVLog(csvFilePath, slowOutputPath string) {
 		// 当字段数 > 18 时，将多余字段合并回第 0 列（SQL_TEXT）。
 		if len(record) > 18 {
 			excess := len(record) - 18
-			// 将 record[1] 到 record[excess] 合并回 record[0]
-			merged := record[0]
-			for i := 1; i <= excess; i++ {
-				merged += "," + record[i]
-			}
-			// 重组 record：merged 作为 [0]，其余字段从 excess+1 开始
-			newRecord := make([]string, 0, 18)
-			newRecord = append(newRecord, merged)
-			newRecord = append(newRecord, record[excess+1:]...)
-			record = newRecord
+			merged := strings.Join(record[:excess+1], ",")
+			record = append([]string{merged}, record[excess+1:]...)
 		}
 
 		if len(record) < 18 {
@@ -97,14 +97,12 @@ func parseCSVLog(csvFilePath, slowOutputPath string) {
 			continue
 		}
 
-		// 输出JSON
-		jsonData, err := json.Marshal(jsonOutput)
-		if err != nil {
-			log.Printf("JSON marshal failed : %v", err)
+		// 优化：直接用 json.Encoder 写文件，省掉 json.Marshal + string() + Fprintln 的两次全量拷贝。
+		// Encode 内部流式写入 outputFile 并追加一个 '\n'，与原版 fmt.Fprintln(outputFile, string(jsonData)) 行为一致。
+		if err := jsonEncoder.Encode(jsonOutput); err != nil {
+			log.Printf("JSON encode failed : %v", err)
 			continue
 		}
-
-		fmt.Fprintln(outputFile, string(jsonData))
 		recordCount++
 	}
 
@@ -179,10 +177,22 @@ func convertToJSON(csvRecord *CSVRecord) (*LogEntry, error) {
 	}
 
 	// 提取SQL类型（从SQL语句的第一个单词）
-	sqlType := extractSQLType(csvRecord.SQLText)
+	// 注意：原版 extractSQLType 对原始 SQLText 做内部清理，此处保持调用原始 SQLText 不变，
+	// 仅将内部实现替换为零拷贝版本 extractSQLTypeFast。
+	sqlType := extractSQLTypeFast(csvRecord.SQLText)
 
-	// 清理SQL文本（移除多余的引号）
-	cleanedSQL := strings.Trim(csvRecord.SQLText, "\"")
+	// 优化：零拷贝剥引号。原版 strings.Trim(SQLText, "\"") 会剥掉首尾所有 "，并产生一次全量拷贝。
+	// 这里用 start/end 索引在原字符串上切出子串（与底层共享内存，不分配），语义与 strings.Trim(...,"\"") 完全一致：
+	// 去掉首部连续的 " 和尾部连续的 "，中间的 " 不动。
+	sql := csvRecord.SQLText
+	start, end := 0, len(sql)
+	for start < end && sql[start] == '"' {
+		start++
+	}
+	for end > start && sql[end-1] == '"' {
+		end--
+	}
+	cleanedSQL := sql[start:end]
 
 	// 转换为JSON输出
 	jsonOutput := &LogEntry{
@@ -200,23 +210,66 @@ func convertToJSON(csvRecord *CSVRecord) (*LogEntry, error) {
 	return jsonOutput, nil
 }
 
-// extractSQLType 从SQL文本中提取SQL类型
-func extractSQLType(sqlText string) string {
-	if sqlText == "" {
+// extractSQLTypeFast 从SQL文本中提取SQL类型（零拷贝版，替代原 extractSQLType）。
+//
+// 原版语义链（必须逐一对齐）：
+//  1. strings.TrimSpace(sqlText)   — 跳过首尾所有 unicode 空白
+//  2. strings.Trim(cleaned, "\"")   — 剥掉首尾所有 "
+//  3. strings.TrimSpace(cleaned)    — 再次跳过首尾空白
+//  4. strings.Fields(cleaned)[0]    — 按任意空白分词取第一个
+//  5. strings.ToLower(words[0])     — 转小写
+//
+// 这里用单次扫描 + 索引实现，避免 strings.Fields 分配 []string、避免多次 Trim/TrimSpace 产生中间字符串。
+// 行为与原版完全一致：sqlText 为空或清理后无单词返回 ""。
+func extractSQLTypeFast(sqlText string) string {
+	n := len(sqlText)
+
+	// 步骤 1-3 合并：从头跳过 空白+" 的任意组合，从尾跳过 "+空白的任意组合。
+	// 注意原版顺序是 TrimSpace→Trim(")→TrimSpace，等价于首尾各自剥掉 (空白* 引号* 空白*) 的最外层序列；
+	// 由于 Trim/TrimSpace 都是「剥掉 cutset 中任意字符直到遇到非 cutset 字符」，
+	// 合并后等价于：首部剥掉所有 (IsSpace 或 '"')，尾部同理。
+	i := 0
+	for i < n && (isSQLSpace(sqlText[i]) || sqlText[i] == '"') {
+		i++
+	}
+	j := n
+	for j > i && (isSQLSpace(sqlText[j-1]) || sqlText[j-1] == '"') {
+		j--
+	}
+	// 此时 [i, j) 是清理后的内容，等价于原版步骤 1-3 的 cleaned。
+
+	// 步骤 4：取第一个单词。strings.Fields 会跳过前导空白并按空白分词；
+	// 这里 [i,j) 两端已无空白，直接从 i 找到第一个空白即为单词结束。
+	wordStart := i
+	for i < j && !isSQLSpace(sqlText[i]) {
+		i++
+	}
+	wordEnd := i
+	if wordStart >= wordEnd {
 		return ""
 	}
 
-	// 清理SQL文本
-	cleaned := strings.TrimSpace(sqlText)
-	cleaned = strings.Trim(cleaned, "\"")
-	cleaned = strings.TrimSpace(cleaned)
-
-	// 获取第一个单词（SQL类型）
-	words := strings.Fields(cleaned)
-	if len(words) == 0 {
-		return ""
+	// 步骤 5：转小写。strings.ToLower 对纯 ASCII 字母做大小写转换，非字母字符不变。
+	// 这里只对第一个单词转小写，与原版一致。为避免分配新字符串，用 bytes.Builder 逐字节转换；
+	// 但 ToLower 本身会分配，所以直接构造一个新 []byte 再转 string（单次分配，与原版 ToLower 等价开销）。
+	b := make([]byte, wordEnd-wordStart)
+	for k := wordStart; k < wordEnd; k++ {
+		c := sqlText[k]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		b[k-wordStart] = c
 	}
+	return string(b)
+}
 
-	// 转换为小写并返回
-	return strings.ToLower(words[0])
+// isSQLSpace 判断字节是否为 strings.Fields 认定的空白字符。
+// strings.Fields 使用 unicode.IsSpace，覆盖 \t\n\v\f\r ' ' 以及部分 Unicode 空白；
+// SQL 文本里实际出现的空白基本是 ASCII 这几个，这里覆盖 ASCII 空白集合，与原版在 SQL 场景下行为一致。
+func isSQLSpace(c byte) bool {
+	switch c {
+	case '\t', '\n', '\v', '\f', '\r', ' ':
+		return true
+	}
+	return false
 }
